@@ -11,8 +11,8 @@ android {
         applicationId = "com.jarvis.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
     }
 
     buildTypes {
@@ -27,6 +27,7 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
-    // Detecta la palabra "Jarvis" dentro del celular, sin internet
-    implementation("ai.picovoice:porcupine-android:3.0.+")
+    // Vosk: reconoce la palabra "Jarvis" dentro del celular, sin internet y sin cuentas
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    implementation("com.alphacephei:vosk-android:0.3.47@aar")
 }

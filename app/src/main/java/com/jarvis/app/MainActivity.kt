@@ -135,10 +135,6 @@ class MainActivity : Activity() {
             if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 pedirPermisos(); return
             }
-            if (Config.pico(this).isBlank()) {
-                Toast.makeText(this, "Primero pega tu clave de Picovoice en ⚙", Toast.LENGTH_LONG).show()
-                mostrarAjustes(); return
-            }
             pedirSinLimiteDeBateria()
             JarvisService.iniciar(this)
         }
@@ -180,7 +176,6 @@ class MainActivity : Activity() {
         }
         val url = campo("Dirección de Jarvis (https://…)", Config.url(this))
         val clave = campo("Clave de acceso", Config.clave(this), true)
-        val pico = campo("Clave de Picovoice (AccessKey)", Config.pico(this), true)
         caja.addView(TextView(this).apply {
             text = if (Infrarrojo.disponible(this@MainActivity)) "Infrarrojo del celular: ✔ disponible"
             else "Infrarrojo del celular: ✘ no encontrado"
@@ -189,7 +184,7 @@ class MainActivity : Activity() {
             .setTitle("Ajustes de Jarvis")
             .setView(caja)
             .setPositiveButton("Guardar") { _, _ ->
-                Config.guardar(this, url.text.toString(), clave.text.toString(), pico.text.toString())
+                Config.guardar(this, url.text.toString(), clave.text.toString(), null)
                 cargar()
                 if (JarvisService.activo) { JarvisService.detener(this); botonOido.postDelayed({ JarvisService.iniciar(this) }, 800) }
             }
@@ -227,14 +222,8 @@ class MainActivity : Activity() {
                 if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                     pedirPermisos(); return@runOnUiThread
                 }
-                if (!JarvisService.activo) {
-                    if (Config.pico(this@MainActivity).isBlank()) {
-                        Toast.makeText(this@MainActivity, "Pega tu clave de Picovoice en ⚙", Toast.LENGTH_LONG).show()
-                        return@runOnUiThread
-                    }
-                    JarvisService.iniciar(this@MainActivity)
-                }
-                botonOido.postDelayed({ JarvisService.escucharAhora(this@MainActivity); actualizarBoton() }, 400)
+                if (!JarvisService.activo) JarvisService.iniciar(this@MainActivity)
+                botonOido.postDelayed({ JarvisService.escucharAhora(this@MainActivity); actualizarBoton() }, 600)
             }
         }
     }

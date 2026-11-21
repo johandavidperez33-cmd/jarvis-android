@@ -145,7 +145,7 @@ object Grabadora {
         return if (hablo) wav(salida.toByteArray()) else null
     }
 
-    private fun wav(pcm: ByteArray): ByteArray {
+    fun wav(pcm: ByteArray): ByteArray {
         val b = ByteBuffer.allocate(44 + pcm.size).order(ByteOrder.LITTLE_ENDIAN)
         b.put("RIFF".toByteArray()); b.putInt(36 + pcm.size); b.put("WAVE".toByteArray())
         b.put("fmt ".toByteArray()); b.putInt(16); b.putShort(1.toShort()); b.putShort(1.toShort())
