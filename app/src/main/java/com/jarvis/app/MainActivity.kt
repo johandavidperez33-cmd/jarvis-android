@@ -182,7 +182,42 @@ class MainActivity : Activity() {
             text = if (Infrarrojo.disponible(this@MainActivity)) "Infrarrojo del celular: ✔ disponible"
             else "Infrarrojo del celular: ✘ no encontrado"
         })
-        caja.addView(TextView(this).apply { text = "Versión de la app: ${BuildConfig.VERSION_NAME}" })
+        // ---- reconocimiento de la voz del dueño
+        caja.addView(TextView(this).apply {
+            text = "\n🔒 Reconocimiento de voz: " +
+                if (Config.huella(this@MainActivity) != null) "✔ su voz está registrada" else "✘ sin registrar (responde a todos)"
+        })
+        caja.addView(Button(this).apply {
+            text = if (Config.huella(this@MainActivity) != null) "Registrar mi voz de nuevo" else "Registrar mi voz"
+            setOnClickListener { registrarVoz() }
+        })
+        caja.addView(android.widget.CheckBox(this).apply {
+            text = "Solo responder a mi voz"
+            isChecked = Config.soloMiVoz(this@MainActivity)
+            setOnCheckedChangeListener { _, v -> Config.guardarSoloMiVoz(this@MainActivity, v) }
+        })
+        val etiqueta = TextView(this)
+        fun textoExigencia(v: Int) = "Exigencia: $v% (pide un parecido de ${((0.45 + 0.35 * v / 100.0) * 100).toInt()}%)" +
+            when { v < 30 -> " · más tolerante"; v > 65 -> " · más estricto"; else -> "" }
+        etiqueta.text = textoExigencia(Config.exigencia(this))
+        caja.addView(etiqueta)
+        caja.addView(android.widget.SeekBar(this).apply {
+            max = 100
+            progress = Config.exigencia(this@MainActivity)
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: android.widget.SeekBar?, v: Int, u: Boolean) {
+                    etiqueta.text = textoExigencia(v); Config.guardarExigencia(this@MainActivity, v)
+                }
+                override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(s: android.widget.SeekBar?) {}
+            })
+        })
+        caja.addView(TextView(this).apply {
+            text = "Si no le responde a usted, baje la exigencia. Si le responde a otros, súbala."
+            textSize = 12f
+        })
+
+        caja.addView(TextView(this).apply { text = "\nVersión de la app: ${BuildConfig.VERSION_NAME}" })
         caja.addView(Button(this).apply {
             text = "Buscar actualización"
             setOnClickListener { Actualizador.revisar(this@MainActivity, avisarSiNoHay = true) }
@@ -197,6 +232,33 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Cancelar", null)
             .show()
+    }
+
+    /** Registro de la voz del dueño: 3 frases, guiadas por el servicio del oído. */
+    private fun registrarVoz() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pedirPermisos(); return
+        }
+        val mensaje = TextView(this).apply {
+            setPadding(48, 32, 48, 16); textSize = 16f
+            text = "Preparando… (la primera vez descarga el reconocimiento de voz, 13 MB)\n\n" +
+                "Hable normal, a la distancia de siempre, sin ruido de fondo."
+        }
+        val dialogo = AlertDialog.Builder(this)
+            .setTitle("🔒 Registrar mi voz")
+            .setView(mensaje)
+            .setNegativeButton("Cerrar") { _, _ -> JarvisService.alRegistro = null }
+            .setCancelable(false)
+            .show()
+        JarvisService.alRegistro = { texto, terminado ->
+            mensaje.text = texto
+            if (terminado) {
+                dialogo.getButton(AlertDialog.BUTTON_NEGATIVE)?.text = "Listo"
+                JarvisService.alRegistro = null
+            }
+        }
+        JarvisService.registrarVoz(this)
+        botonOido.postDelayed({ actualizarBoton() }, 800)
     }
 
     /** Funciones que la página de Jarvis puede usar dentro de la app. */

@@ -23,12 +23,55 @@ object Config {
     fun url(c: Context) = (p(c).getString("url", "") ?: "").trim().trimEnd('/')
     fun clave(c: Context) = p(c).getString("clave", "") ?: ""
     fun pico(c: Context) = p(c).getString("pico", "") ?: ""
+    // ---- reconocimiento de la voz del dueño
+    fun huella(c: Context): DoubleArray? {
+        val s = p(c).getString("huella", null) ?: return null
+        return try {
+            val a = JSONArray(s); DoubleArray(a.length()) { a.getDouble(it) }
+        } catch (e: Exception) { null }
+    }
+    fun guardarHuella(c: Context, h: DoubleArray?) {
+        val e = p(c).edit()
+        if (h == null) e.remove("huella") else e.putString("huella", JSONArray(h.toList()).toString())
+        e.apply()
+    }
+    fun soloMiVoz(c: Context) = p(c).getBoolean("solo_mi_voz", true)
+    fun guardarSoloMiVoz(c: Context, v: Boolean) = p(c).edit().putBoolean("solo_mi_voz", v).apply()
+    /** Exigencia 0..100 -> umbral de parecido 0,45..0,80 (por defecto 0,60). */
+    fun exigencia(c: Context) = p(c).getInt("exigencia", 43)
+    fun guardarExigencia(c: Context, v: Int) = p(c).edit().putInt("exigencia", v.coerceIn(0, 100)).apply()
+    fun umbral(c: Context) = 0.45 + 0.35 * exigencia(c) / 100.0
+
     fun guardar(c: Context, url: String?, clave: String?, pico: String?) {
         val e = p(c).edit()
         url?.takeIf { it.isNotBlank() }?.let { e.putString("url", it.trim().trimEnd('/')) }
         clave?.takeIf { it.isNotBlank() }?.let { e.putString("clave", it.trim().lowercase()) }
         pico?.takeIf { it.isNotBlank() }?.let { e.putString("pico", it.trim()) }
         e.apply()
+    }
+}
+
+/** Compara huellas de voz (similitud coseno, 1 = idénticas). */
+object Huella {
+    fun desdeResultado(json: String): Pair<DoubleArray, Int>? {
+        return try {
+            val o = JSONObject(json)
+            val a = o.optJSONArray("spk") ?: return null
+            Pair(DoubleArray(a.length()) { a.getDouble(it) }, o.optInt("spk_frames", 0))
+        } catch (e: Exception) { null }
+    }
+    fun normalizar(v: DoubleArray): DoubleArray {
+        val n = sqrt(v.sumOf { it * it }).takeIf { it > 0 } ?: 1.0
+        return DoubleArray(v.size) { v[it] / n }
+    }
+    fun similitud(a: DoubleArray, b: DoubleArray): Double {
+        if (a.size != b.size) return 0.0
+        val x = normalizar(a); val y = normalizar(b)
+        return (x.indices).sumOf { x[it] * y[it] }
+    }
+    fun promedio(lista: List<DoubleArray>): DoubleArray {
+        val n = lista.map { normalizar(it) }
+        return DoubleArray(n[0].size) { i -> n.sumOf { it[i] } / n.size }
     }
 }
 
