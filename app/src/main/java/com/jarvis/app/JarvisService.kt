@@ -46,6 +46,19 @@ class JarvisService : Service() {
         private const val TASA = 16000
         private const val UMBRAL_VOZ = 700.0
         private const val FRASES_REGISTRO = 3
+        /** Bloques seguidos (100 ms c/u) en que Vosk debe oír "jarvis" antes de aceptar: evita falsas alarmas. */
+        private const val CONFIRMAR_JARVIS = 3
+        /**
+         * Gramática del oído: "jarvis" + palabras señuelo. Con solo ["jarvis","[unk]"] Vosk convertía casi
+         * cualquier frase ("jardín", "llave", "ayer"...) en "jarvis" (33 de 42 falsas alarmas en pruebas).
+         * Con los señuelos: 3 de 42, y sigue entendiendo jarvis / yarvis / llarvis / yarbis / charvis.
+         */
+        private val GRAMATICA = org.json.JSONArray(listOf("jarvis") + (
+            "jardín garbanzo el la los las de que en un una por para con no si sí está están hola oye bueno " +
+            "vamos ver vi mi tu qué cómo dónde cuándo hoy mañana tarde noche casa carro tele aire luz agua " +
+            "comer pizza hora abuela pásame prende apaga enciende estudió hugo harina parque barco marcos " +
+            "tarjeta jabón jamás jorge yerba hierba verde vida vivir abril ahí allí así").split(" ") +
+            listOf("[unk]")).toString()
         @Volatile var activo = false
         var alIntercambio: ((String, String) -> Unit)? = null
         var alCambiarEstado: (() -> Unit)? = null
@@ -154,7 +167,7 @@ class JarvisService : Service() {
             val rutaHuella = ModeloVoz.asegurarHuella(this) { p -> if (p % 20 == 0) avisar("Descargando reconocimiento de voz… $p%") }
             val m = Model(ruta); modelo = m
             val mh = SpeakerModel(rutaHuella); modeloHuella = mh
-            val r = Recognizer(m, TASA.toFloat(), "[\"jarvis\", \"[unk]\"]"); rec = r
+            val r = Recognizer(m, TASA.toFloat(), GRAMATICA); rec = r
             val ro = Recognizer(m, TASA.toFloat(), mh).apply { setWords(true) }; recOrden = ro
             val minimo = AudioRecord.getMinBufferSize(TASA, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             val mc = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, TASA, AudioFormat.CHANNEL_IN_MONO,
@@ -171,6 +184,8 @@ class JarvisService : Service() {
             var hablo = false
             var bipHecho = false
             val muestras = mutableListOf<DoubleArray>() // huellas del registro
+            var oyeJarvis = 0 // bloques seguidos en que se oyó "jarvis"
+            val previo = ArrayDeque<ShortArray>() // últimos 300 ms, para no cortar el inicio de la orden
 
             fun empezarCaptura() {
                 captura.reset(); total = 0; silencio = 0; hablo = false
@@ -192,6 +207,7 @@ class JarvisService : Service() {
                 }
                 if (pedirOrden && estado == Estado.ESPERANDO) { // botón 🎙 de la app
                     pedirOrden = false
+                    previo.clear(); oyeJarvis = 0
                     estado = Estado.ORDEN
                     empezarCaptura()
                     bip(); bipHecho = true
@@ -202,13 +218,20 @@ class JarvisService : Service() {
 
                 when (estado) {
                     Estado.ESPERANDO -> {
+                        previo.addLast(buf.copyOf(n)); if (previo.size > 3) previo.removeFirst()
                         val final = r.acceptWaveForm(buf, n)
                         val texto = if (final) r.result else r.partialResult
-                        if (texto.contains("jarvis")) {
+                        if (texto.contains("jarvis")) oyeJarvis++ else oyeJarvis = 0
+                        // se acepta si Vosk lo da por terminado o si lo sigue oyendo varios bloques seguidos
+                        if (oyeJarvis > 0 && (final || oyeJarvis >= CONFIRMAR_JARVIS)) {
+                            oyeJarvis = 0
                             r.reset()
                             estado = Estado.ORDEN
                             empezarCaptura(); bipHecho = false
-                            avisar("Escuchando…")
+                            for (p in previo) { captura.write(aBytes(p, p.size)); ro.acceptWaveForm(p, p.size); total++ }
+                            previo.clear()
+                            avisar(if (Holograma.puedeMostrar(this)) "Escuchando…"
+                                else "Escuchando… (para ver el holograma active Ajustes > Accesibilidad > Jarvis)")
                             Holograma.mostrar(this, "escuchando", "Le escucho, señor…")
                         }
                     }
