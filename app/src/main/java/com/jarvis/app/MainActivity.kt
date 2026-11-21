@@ -212,6 +212,12 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun tieneIR(): Boolean = Infrarrojo.disponible(this@MainActivity)
 
+        /** La página avisa la clave correcta cuando el usuario entra bien: la app la recuerda. */
+        @JavascriptInterface
+        fun guardarClave(clave: String) {
+            Config.guardar(this@MainActivity, null, clave, null)
+        }
+
         @JavascriptInterface
         fun oidoActivo(): Boolean = JarvisService.activo
 
