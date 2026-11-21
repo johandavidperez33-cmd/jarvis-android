@@ -206,6 +206,13 @@ class MainActivity : Activity() {
             })
         }
 
+        // ---- holograma flotante
+        caja.addView(android.widget.CheckBox(this).apply {
+            text = "✨ Holograma: encender la pantalla al decir \"Jarvis\""
+            isChecked = Config.despertarPantalla(this@MainActivity)
+            setOnCheckedChangeListener { _, v -> Config.guardarDespertarPantalla(this@MainActivity, v) }
+        })
+
         // ---- reconocimiento de la voz del dueño
         caja.addView(TextView(this).apply {
             text = "\n🔒 Reconocimiento de voz: " +

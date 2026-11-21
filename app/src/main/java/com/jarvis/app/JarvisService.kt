@@ -196,6 +196,7 @@ class JarvisService : Service() {
                     empezarCaptura()
                     bip(); bipHecho = true
                     avisar("Escuchando…")
+                    Holograma.mostrar(this, "escuchando", "Le escucho, señor…")
                     continue
                 }
 
@@ -208,13 +209,16 @@ class JarvisService : Service() {
                             estado = Estado.ORDEN
                             empezarCaptura(); bipHecho = false
                             avisar("Escuchando…")
+                            Holograma.mostrar(this, "escuchando", "Le escucho, señor…")
                         }
                     }
                     Estado.ORDEN -> {
                         captura.write(aBytes(buf, n))
                         ro.acceptWaveForm(buf, n)
                         total++
-                        val voz = volumen(buf, n) > UMBRAL_VOZ
+                        val vol = volumen(buf, n)
+                        Holograma.nivel((vol / 4000.0).toFloat())
+                        val voz = vol > UMBRAL_VOZ
                         if (voz) silencio = 0 else silencio++
                         if (voz && total > 3) hablo = true // los primeros 300 ms pueden ser el final de "Jarvis"
                         if (!hablo && total == 8 && !bipHecho) { // dijo solo "Jarvis": bip y esperamos la orden
@@ -230,6 +234,8 @@ class JarvisService : Service() {
                                 estado = Estado.ESPERANDO
                                 r.reset()
                                 avisar(rechazo)
+                                Holograma.mostrar(this, "error", rechazo.removePrefix("🔒 ").substringBefore(" Ignorado"))
+                                Holograma.ocultar(2500)
                             } else {
                                 estado = Estado.PROCESANDO
                                 val crudo = try { JSONObject(resultado).optString("text") } catch (e: Exception) { "" }
@@ -241,6 +247,7 @@ class JarvisService : Service() {
                             estado = Estado.ESPERANDO
                             r.reset()
                             avisar("Diga \"Jarvis\"…")
+                            Holograma.ocultar(300)
                         }
                     }
                     Estado.REGISTRO -> {
@@ -338,6 +345,7 @@ class JarvisService : Service() {
 
     private fun procesar(wav: ByteArray, textoLocal: String?) {
         avisar("Entendiendo…")
+        Holograma.mostrar(this, "pensando", "Procesando…")
         trabajo.execute {
             try {
                 var texto = textoLocal ?: run {
@@ -350,6 +358,7 @@ class JarvisService : Service() {
                     return@execute
                 }
                 avisar("Usted: $texto")
+                Holograma.mostrar(this, "pensando", "“$texto”")
                 val r = Api.post(this, "/api/chat", JSONObject().put("texto", texto).put("sesion", "app")
                     .put("voz", true).put("origen", "app"))
                 val respuesta = r.optString("respuesta")
@@ -375,6 +384,7 @@ class JarvisService : Service() {
                 principal.post {
                     hablar(respuesta, audio) {
                         avisar(aviso)
+                        Holograma.mostrar(this, "hablando", respuesta)
                         alIntercambio?.invoke(texto, respuesta)
                     }
                 }
@@ -389,6 +399,8 @@ class JarvisService : Service() {
         principal.post {
             estado = Estado.ESPERANDO
             if (activo && mensaje != null) avisar(mensaje)
+            Holograma.ocultar(if (mensaje != null) 2500 else 1500)
+            if (mensaje != null) Holograma.mostrar(this, "error", mensaje).also { Holograma.ocultar(2500) }
         }
     }
 
@@ -398,6 +410,7 @@ class JarvisService : Service() {
         val respuesta = problema ?: frase
         principal.post { alIntercambio?.invoke(dicho, respuesta) }
         avisar(if (problema != null) "⚠ $problema" else "⚡ $frase")
+        Holograma.mostrar(this, if (problema != null) "error" else "hablando", respuesta)
         val archivo = Celular.archivoFrase(this, frase)
         if (problema == null && archivo.exists() && archivo.length() > 1000) {
             principal.post { reproducirArchivo(archivo.absolutePath) }

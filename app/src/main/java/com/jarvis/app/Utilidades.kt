@@ -35,6 +35,8 @@ object Config {
         if (h == null) e.remove("huella") else e.putString("huella", JSONArray(h.toList()).toString())
         e.apply()
     }
+    fun despertarPantalla(c: Context) = p(c).getBoolean("despertar", true)
+    fun guardarDespertarPantalla(c: Context, v: Boolean) = p(c).edit().putBoolean("despertar", v).apply()
     fun soloMiVoz(c: Context) = p(c).getBoolean("solo_mi_voz", true)
     fun guardarSoloMiVoz(c: Context, v: Boolean) = p(c).edit().putBoolean("solo_mi_voz", v).apply()
     /** Exigencia 0..100 -> umbral de parecido 0,45..0,80 (por defecto 0,60). */
