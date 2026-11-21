@@ -39,6 +39,7 @@ class MainActivity : Activity() {
         leerEnlace(intent)
         construir()
         pedirPermisos()
+        Actualizador.revisar(this)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -179,6 +180,11 @@ class MainActivity : Activity() {
         caja.addView(TextView(this).apply {
             text = if (Infrarrojo.disponible(this@MainActivity)) "Infrarrojo del celular: ✔ disponible"
             else "Infrarrojo del celular: ✘ no encontrado"
+        })
+        caja.addView(TextView(this).apply { text = "Versión de la app: ${BuildConfig.VERSION_NAME}" })
+        caja.addView(Button(this).apply {
+            text = "Buscar actualización"
+            setOnClickListener { Actualizador.revisar(this@MainActivity, avisarSiNoHay = true) }
         })
         AlertDialog.Builder(this)
             .setTitle("Ajustes de Jarvis")

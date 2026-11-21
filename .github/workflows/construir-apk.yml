@@ -23,15 +23,30 @@ jobs:
         with:
           gradle-version: "8.7"
 
+      - name: Preparar la firma fija
+        env:
+          FIRMA_JKS: ${{ secrets.FIRMA_JKS }}
+        run: |
+          if [ -z "$FIRMA_JKS" ]; then
+            echo "::error::Falta el secreto FIRMA_JKS (la firma fija). Ejecuta subir_firma.sh en la PC."
+            exit 1
+          fi
+          echo "$FIRMA_JKS" | base64 -d > "$RUNNER_TEMP/jarvis.jks"
+          echo "FIRMA_ARCHIVO=$RUNNER_TEMP/jarvis.jks" >> "$GITHUB_ENV"
+          echo "NUMERO_VERSION=$((GITHUB_RUN_NUMBER + 10))" >> "$GITHUB_ENV"
+
       - name: Compilar
+        env:
+          FIRMA_CLAVE: ${{ secrets.FIRMA_CLAVE }}
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Publicar el APK para descargarlo desde el celular
+      - name: Publicar el APK (la app lo descarga sola para actualizarse)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk jarvis.apk
+          echo "{\"version\": $NUMERO_VERSION, \"nombre\": \"3.$NUMERO_VERSION\"}" > version.json
           gh release delete apk --yes --cleanup-tag || true
-          gh release create apk jarvis.apk \
-            --title "Jarvis para Android" \
-            --notes "Descarga jarvis.apk en el celular e instálalo. Versión del commit ${GITHUB_SHA::7}."
+          gh release create apk jarvis.apk version.json \
+            --title "Jarvis para Android 3.$NUMERO_VERSION" \
+            --notes "Descarga jarvis.apk en el celular e instálalo. Versión 3.$NUMERO_VERSION (commit ${GITHUB_SHA::7})."

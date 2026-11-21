@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Número de versión: lo pone GitHub en cada fabricación (sube solo: 10, 11, 12…)
+val numeroVersion = (System.getenv("NUMERO_VERSION") ?: "3").toInt()
+
 android {
     namespace = "com.jarvis.app"
     compileSdk = 34
@@ -11,11 +14,30 @@ android {
         applicationId = "com.jarvis.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "2.1"
+        versionCode = numeroVersion
+        versionName = "3.$numeroVersion"
     }
 
+    // Firma fija: así cada versión nueva se instala encima de la anterior (actualización)
+    val archivoFirma = System.getenv("FIRMA_ARCHIVO")
+    signingConfigs {
+        if (archivoFirma != null) {
+            create("fija") {
+                storeFile = file(archivoFirma)
+                storePassword = System.getenv("FIRMA_CLAVE")
+                keyAlias = "jarvis"
+                keyPassword = System.getenv("FIRMA_CLAVE")
+                storeType = "jks"
+            }
+        }
+    }
+
+    buildFeatures { buildConfig = true }
+
     buildTypes {
+        debug {
+            if (archivoFirma != null) signingConfig = signingConfigs.getByName("fija")
+        }
         release { isMinifyEnabled = false }
     }
     compileOptions {
