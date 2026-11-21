@@ -46,7 +46,15 @@ jobs:
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk jarvis.apk
           echo "{\"version\": $NUMERO_VERSION, \"nombre\": \"3.$NUMERO_VERSION\"}" > version.json
-          gh release delete apk --yes --cleanup-tag || true
-          gh release create apk jarvis.apk version.json \
-            --title "Jarvis para Android 3.$NUMERO_VERSION" \
-            --notes "Descarga jarvis.apk en el celular e instálalo. Versión 3.$NUMERO_VERSION (commit ${GITHUB_SHA::7})."
+          NOTAS="Descarga jarvis.apk en el celular e instálalo. Versión 3.$NUMERO_VERSION (commit ${GITHUB_SHA::7})."
+          if gh release view apk >/dev/null 2>&1; then
+            # la publicación ya existe: solo reemplazamos los archivos (nunca queda como borrador)
+            gh release upload apk jarvis.apk version.json --clobber
+            gh release edit apk --draft=false --title "Jarvis para Android 3.$NUMERO_VERSION" --notes "$NOTAS"
+          else
+            gh release create apk jarvis.apk version.json --target "$GITHUB_SHA" \
+              --title "Jarvis para Android 3.$NUMERO_VERSION" --notes "$NOTAS"
+          fi
+          # comprobación: el archivo de versión tiene que poder descargarse
+          sleep 5
+          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/apk/version.json"
