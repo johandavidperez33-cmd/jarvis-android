@@ -123,6 +123,7 @@ class JarvisService : Service() {
     private fun bucleOido() {
         var modelo: Model? = null
         var rec: Recognizer? = null
+        var recOrden: Recognizer? = null // entiende la orden completa dentro del celular (rápido)
         var mic: AudioRecord? = null
         try {
             LibVosk.setLogLevel(LogLevel.WARNINGS)
@@ -130,6 +131,7 @@ class JarvisService : Service() {
             val ruta = ModeloVoz.asegurar(this) { p -> if (p % 10 == 0) avisar("Descargando el oído… $p%") }
             modelo = Model(ruta)
             rec = Recognizer(modelo, TASA.toFloat(), "[\"jarvis\", \"[unk]\"]")
+            recOrden = Recognizer(modelo, TASA.toFloat()).apply { setWords(true) }
             val minimo = AudioRecord.getMinBufferSize(TASA, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             mic = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, TASA, AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT, maxOf(minimo, 6400) * 2)
@@ -152,6 +154,7 @@ class JarvisService : Service() {
                     pedirOrden = false
                     estado = Estado.ORDEN
                     captura.reset(); total = 0; silencio = 0; hablo = false
+                    recOrden.reset()
                     bip(); bipHecho = true
                     avisar("Escuchando…")
                     continue
@@ -165,11 +168,13 @@ class JarvisService : Service() {
                             rec.reset()
                             estado = Estado.ORDEN
                             captura.reset(); total = 0; silencio = 0; hablo = false; bipHecho = false
+                            recOrden.reset()
                             avisar("Escuchando…")
                         }
                     }
                     Estado.ORDEN -> {
                         captura.write(aBytes(buf, n))
+                        recOrden.acceptWaveForm(buf, n)
                         total++
                         val voz = volumen(buf, n) > UMBRAL_VOZ
                         if (voz) silencio = 0 else silencio++
@@ -177,11 +182,14 @@ class JarvisService : Service() {
                         if (!hablo && total == 8 && !bipHecho) { // dijo solo "Jarvis": bip y esperamos la orden
                             bip(); bipHecho = true
                             captura.reset()
+                            recOrden.reset()
                         }
-                        val termino = (hablo && silencio >= 12) || total >= 100
+                        val termino = (hablo && silencio >= 9) || total >= 100 // 0,9 s de silencio
                         if (termino) {
                             estado = Estado.PROCESANDO
-                            procesar(Grabadora.wav(captura.toByteArray()))
+                            val local = textoSeguro(recOrden.finalResult)
+                            recOrden.reset()
+                            procesar(Grabadora.wav(captura.toByteArray()), local)
                         } else if (!hablo && total >= 60) {
                             estado = Estado.ESPERANDO
                             rec.reset()
@@ -198,6 +206,7 @@ class JarvisService : Service() {
             try { mic?.stop() } catch (_: Exception) {}
             mic?.release()
             rec?.close()
+            recOrden?.close()
             modelo?.close()
         }
     }
@@ -218,12 +227,29 @@ class JarvisService : Service() {
         return bytes
     }
 
-    private fun procesar(wav: ByteArray) {
+    /** Texto que entendió Vosk, solo si está seguro (confianza promedio alta). Si no, null -> usamos Gemini. */
+    private fun textoSeguro(json: String): String? {
+        return try {
+            val o = JSONObject(json)
+            val texto = o.optString("text").trim()
+            val palabras = o.optJSONArray("result") ?: return null
+            if (texto.isEmpty() || palabras.length() == 0) return null
+            var suma = 0.0
+            for (i in 0 until palabras.length()) suma += palabras.getJSONObject(i).optDouble("conf", 0.0)
+            if (suma / palabras.length() >= 0.85) texto else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun procesar(wav: ByteArray, textoLocal: String?) {
         avisar("Entendiendo…")
         trabajo.execute {
             try {
-                val b64 = Base64.encodeToString(wav, Base64.NO_WRAP)
-                var texto = Api.post(this, "/api/transcribir", JSONObject().put("audio", b64)).optString("texto").trim()
+                var texto = textoLocal ?: run {
+                    val b64 = Base64.encodeToString(wav, Base64.NO_WRAP)
+                    Api.post(this, "/api/transcribir", JSONObject().put("audio", b64)).optString("texto").trim()
+                }
                 texto = texto.replace(Regex("^(oye\\s+)?(jarvis|yarvis|harvis)[,.!¿?\\s]*", RegexOption.IGNORE_CASE), "").trim()
                 if (texto.isEmpty()) {
                     listo("No le entendí. Diga \"Jarvis\"…")
@@ -232,9 +258,17 @@ class JarvisService : Service() {
                 avisar("Usted: $texto")
                 val r = Api.post(this, "/api/chat", JSONObject().put("texto", texto).put("sesion", "app"))
                 val respuesta = r.optString("respuesta")
-                if (!Infrarrojo.ejecutar(this, r.optJSONArray("acciones"))) avisar("No pude usar el infrarrojo del celular")
+                val acciones = r.optJSONArray("acciones")
+                val huboIR = acciones != null && acciones.length() > 0
+                val irOk = Infrarrojo.ejecutar(this, acciones)
                 principal.post { alIntercambio?.invoke(texto, respuesta) }
-                avisar(respuesta)
+                avisar(
+                    when {
+                        huboIR && irOk -> "📡 Señal infrarroja enviada ✔\n$respuesta"
+                        huboIR -> "📡 ✘ El celular NO pudo enviar el infrarrojo\n$respuesta"
+                        else -> respuesta
+                    }
+                )
                 principal.post { hablar(respuesta) }
             } catch (e: Exception) {
                 listo("Sin conexión con Jarvis (${e.message}). ¿Está encendida la PC?")
