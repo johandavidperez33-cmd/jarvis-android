@@ -261,15 +261,18 @@ class JarvisService : Service() {
                 val acciones = r.optJSONArray("acciones")
                 val huboIR = acciones != null && acciones.length() > 0
                 val irOk = Infrarrojo.ejecutar(this, acciones)
-                principal.post { alIntercambio?.invoke(texto, respuesta) }
-                avisar(
-                    when {
-                        huboIR && irOk -> "📡 Señal infrarroja enviada ✔\n$respuesta"
-                        huboIR -> "📡 ✘ El celular NO pudo enviar el infrarrojo\n$respuesta"
-                        else -> respuesta
+                val aviso = when {
+                    huboIR && irOk -> "📡 Señal infrarroja enviada ✔\n$respuesta"
+                    huboIR -> "📡 ✘ El celular NO pudo enviar el infrarrojo\n$respuesta"
+                    else -> respuesta
+                }
+                // el texto aparece justo cuando empieza a sonar la voz
+                principal.post {
+                    hablar(respuesta) {
+                        avisar(aviso)
+                        alIntercambio?.invoke(texto, respuesta)
                     }
-                )
-                principal.post { hablar(respuesta) }
+                }
             } catch (e: Exception) {
                 listo("Sin conexión con Jarvis (${e.message}). ¿Está encendida la PC?")
             }
@@ -284,7 +287,9 @@ class JarvisService : Service() {
         }
     }
 
-    private fun hablar(texto: String) {
+    private fun hablar(texto: String, alComenzarAccion: () -> Unit) {
+        var yaComenzo = false
+        val alComenzar = { if (!yaComenzo) { yaComenzo = true; alComenzarAccion() } }
         try {
             val mp = MediaPlayer()
             reproductor = mp
@@ -295,11 +300,13 @@ class JarvisService : Service() {
                     .build()
             )
             mp.setDataSource(Api.urlVoz(this, texto))
-            mp.setOnPreparedListener { it.start() }
+            mp.setOnPreparedListener { it.start(); alComenzar() }
             mp.setOnCompletionListener { it.release(); reproductor = null; listo() }
-            mp.setOnErrorListener { m, _, _ -> m.release(); reproductor = null; listo(); true }
+            mp.setOnErrorListener { m, _, _ -> alComenzar(); m.release(); reproductor = null; listo(); true }
             mp.prepareAsync()
+            principal.postDelayed({ alComenzar() }, 8000) // si la voz tarda demasiado, igual mostramos el texto
         } catch (e: Exception) {
+            alComenzar()
             listo()
         }
     }

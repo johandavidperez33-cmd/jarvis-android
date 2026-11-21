@@ -110,7 +110,8 @@ class MainActivity : Activity() {
         super.onResume()
         JarvisService.alIntercambio = { pregunta, respuesta ->
             web.evaluateJavascript(
-                "try{agregar(${JSONObject.quote(pregunta)},'yo');agregar(${JSONObject.quote(respuesta)},'jarvis')}catch(e){}",
+                "try{const r=${JSONObject.quote(respuesta)};agregar(${JSONObject.quote(pregunta)},'yo');" +
+                    "(window.agregarAnimado?agregarAnimado(r,r.length*58):agregar(r,'jarvis'))}catch(e){}",
                 null
             )
         }
