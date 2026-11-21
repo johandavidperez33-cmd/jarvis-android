@@ -144,7 +144,8 @@ class MainActivity : Activity() {
     }
 
     private fun pedirPermisos() {
-        val faltan = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        val faltan = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.READ_CONTACTS,
+            Manifest.permission.CALL_PHONE)
         if (Build.VERSION.SDK_INT >= 33) faltan += Manifest.permission.POST_NOTIFICATIONS
         val pedir = faltan.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (pedir.isNotEmpty()) requestPermissions(pedir.toTypedArray(), 1)
@@ -182,6 +183,29 @@ class MainActivity : Activity() {
             text = if (Infrarrojo.disponible(this@MainActivity)) "Infrarrojo del celular: ✔ disponible"
             else "Infrarrojo del celular: ✘ no encontrado"
         })
+        // ---- control del celular por voz (Accesibilidad)
+        caja.addView(TextView(this).apply {
+            text = "\n📱 Control del celular: " +
+                if (Accesibilidad.activa()) "✔ Accesibilidad activa" else "✘ falta activar la Accesibilidad"
+        })
+        if (!Accesibilidad.activa()) {
+            caja.addView(TextView(this).apply {
+                textSize = 12f
+                text = "Toque el botón, busque \"Jarvis (control por voz)\" y actívelo. Si sale \"Ajuste restringido\", " +
+                    "use el segundo botón: ⋮ (arriba a la derecha) > \"Permitir ajustes restringidos\" y vuelva a intentar."
+            })
+            caja.addView(Button(this).apply {
+                text = "Activar Accesibilidad"
+                setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            })
+            caja.addView(Button(this).apply {
+                text = "Permitir ajustes restringidos"
+                setOnClickListener {
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                }
+            })
+        }
+
         // ---- reconocimiento de la voz del dueño
         caja.addView(TextView(this).apply {
             text = "\n🔒 Reconocimiento de voz: " +
@@ -275,6 +299,15 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun tieneIR(): Boolean = Infrarrojo.disponible(this@MainActivity)
+
+        /** Orden del celular que llega desde la página (cuando se escribe en el chat). */
+        @JavascriptInterface
+        fun accionCelular(json: String) {
+            runOnUiThread {
+                val problema = try { Celular.ejecutar(this@MainActivity, JSONObject(json)) } catch (e: Exception) { e.message }
+                if (problema != null) Toast.makeText(this@MainActivity, problema, Toast.LENGTH_LONG).show()
+            }
+        }
 
         /** La página avisa la clave correcta cuando el usuario entra bien: la app la recuerda. */
         @JavascriptInterface

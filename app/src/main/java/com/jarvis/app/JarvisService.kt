@@ -123,6 +123,7 @@ class JarvisService : Service() {
                 acquire()
             }
             iniciarOido()
+            Celular.prepararFrases(this) // frases pregrabadas para responder al instante
             principal.post { alCambiarEstado?.invoke() }
         }
         when (intent?.action) {
@@ -231,7 +232,10 @@ class JarvisService : Service() {
                                 avisar(rechazo)
                             } else {
                                 estado = Estado.PROCESANDO
-                                procesar(Grabadora.wav(captura.toByteArray()), textoSeguro(resultado))
+                                val crudo = try { JSONObject(resultado).optString("text") } catch (e: Exception) { "" }
+                                val rapida = if (crudo.isNotBlank()) Celular.ordenRapida(this, crudo) else null
+                                if (rapida != null) ordenRapida(rapida.first, rapida.second, crudo) // al instante, sin internet
+                                else procesar(Grabadora.wav(captura.toByteArray()), textoSeguro(resultado))
                             }
                         } else if (!hablo && total >= 60) {
                             estado = Estado.ESPERANDO
@@ -346,19 +350,30 @@ class JarvisService : Service() {
                     return@execute
                 }
                 avisar("Usted: $texto")
-                val r = Api.post(this, "/api/chat", JSONObject().put("texto", texto).put("sesion", "app"))
+                val r = Api.post(this, "/api/chat", JSONObject().put("texto", texto).put("sesion", "app")
+                    .put("voz", true).put("origen", "app"))
                 val respuesta = r.optString("respuesta")
                 val acciones = r.optJSONArray("acciones")
-                val huboIR = acciones != null && acciones.length() > 0
-                val irOk = Infrarrojo.ejecutar(this, acciones)
-                val aviso = when {
-                    huboIR && irOk -> "📡 Señal infrarroja enviada ✔\n$respuesta"
-                    huboIR -> "📡 ✘ El celular NO pudo enviar el infrarrojo\n$respuesta"
-                    else -> respuesta
+                var huboIR = false
+                val problemas = mutableListOf<String>()
+                if (acciones != null) for (i in 0 until acciones.length()) {
+                    val a = acciones.optJSONObject(i) ?: continue
+                    when (a.optString("tipo")) {
+                        "ir" -> {
+                            huboIR = true
+                            val arr = a.optJSONArray("patron") ?: continue
+                            if (!Infrarrojo.transmitir(this, a.optInt("frecuencia", 38000), IntArray(arr.length()) { arr.getInt(it) }))
+                                problemas += "📡 ✘ El celular NO pudo enviar el infrarrojo"
+                        }
+                        "celular" -> Celular.ejecutar(this, a)?.let { problemas += "⚠ $it" }
+                    }
                 }
+                val aviso = (listOfNotNull(if (huboIR && problemas.isEmpty()) "📡 Señal infrarroja enviada ✔" else null) +
+                    problemas + respuesta).joinToString("\n")
+                val audio = r.optString("audio").takeIf { it.length > 100 }
                 // el texto aparece justo cuando empieza a sonar la voz
                 principal.post {
-                    hablar(respuesta) {
+                    hablar(respuesta, audio) {
                         avisar(aviso)
                         alIntercambio?.invoke(texto, respuesta)
                     }
@@ -377,7 +392,37 @@ class JarvisService : Service() {
         }
     }
 
-    private fun hablar(texto: String, alComenzarAccion: () -> Unit) {
+    /** Orden simple del celular: se ejecuta y se responde al instante con una frase pregrabada. */
+    private fun ordenRapida(accion: JSONObject, frase: String, dicho: String) {
+        val problema = Celular.ejecutar(this, accion)
+        val respuesta = problema ?: frase
+        principal.post { alIntercambio?.invoke(dicho, respuesta) }
+        avisar(if (problema != null) "⚠ $problema" else "⚡ $frase")
+        val archivo = Celular.archivoFrase(this, frase)
+        if (problema == null && archivo.exists() && archivo.length() > 1000) {
+            principal.post { reproducirArchivo(archivo.absolutePath) }
+        } else {
+            principal.post { hablar(respuesta, null) {} }
+        }
+    }
+
+    private fun reproducirArchivo(ruta: String) {
+        try {
+            val mp = MediaPlayer()
+            reproductor = mp
+            mp.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            mp.setDataSource(ruta)
+            mp.setOnPreparedListener { it.start() }
+            mp.setOnCompletionListener { it.release(); reproductor = null; listo() }
+            mp.setOnErrorListener { m, _, _ -> m.release(); reproductor = null; listo(); true }
+            mp.prepareAsync()
+        } catch (e: Exception) {
+            listo()
+        }
+    }
+
+    private fun hablar(texto: String, audioB64: String?, alComenzarAccion: () -> Unit) {
         var yaComenzo = false
         val alComenzar = { if (!yaComenzo) { yaComenzo = true; alComenzarAccion() } }
         try {
@@ -389,7 +434,13 @@ class JarvisService : Service() {
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
-            mp.setDataSource(Api.urlVoz(this, texto))
+            if (audioB64 != null) { // el audio vino junto con la respuesta: no hay que pedirlo
+                val archivo = java.io.File(cacheDir, "respuesta.mp3")
+                archivo.writeBytes(Base64.decode(audioB64, Base64.DEFAULT))
+                mp.setDataSource(archivo.absolutePath)
+            } else {
+                mp.setDataSource(Api.urlVoz(this, texto))
+            }
             mp.setOnPreparedListener { it.start(); alComenzar() }
             mp.setOnCompletionListener { it.release(); reproductor = null; listo() }
             mp.setOnErrorListener { m, _, _ -> alComenzar(); m.release(); reproductor = null; listo(); true }
